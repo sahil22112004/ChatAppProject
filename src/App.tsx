@@ -1,25 +1,30 @@
-import React from 'react';
-import logo from './logo.svg';
-import './App.css';
+import "./App.css";
+import {  Routes, Route } from "react-router";
+
+import Login from "./pages/authPages/login";
+import Register from "./pages/authPages/register";
+import Dashboard from "./pages/dashboardPage/dashboard";
+// import ViewPage from "./pages/viewPage/viewPage"
+// import ProtectedRoute from "./Routes/protectedRoute";
 
 function App() {
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.tsx</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
+      <Routes>
+        <Route path="/" element={<Login />} />
+        <Route path="/Register" element={<Register />} />
+
+        <Route
+          path="/Dashboard"
+          element={
+            // <ProtectedRoute>
+              <Dashboard />
+
+          }
+        />
+        {/* <Route path="/view/:id" element={<ViewPage />} />  */}
+
+
+      </Routes>
   );
 }
 
