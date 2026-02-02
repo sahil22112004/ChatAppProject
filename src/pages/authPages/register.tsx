@@ -1,28 +1,35 @@
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Box, TextField, Button, Typography, Paper, InputAdornment, IconButton } from "@mui/material";
+import { Box, TextField, Button, Typography, InputAdornment, IconButton, Divider } from "@mui/material";
+import Visibility from "@mui/icons-material/Visibility";
+import VisibilityOff from "@mui/icons-material/VisibilityOff";
+import PersonIcon from '@mui/icons-material/Person';
+import EmailIcon from '@mui/icons-material/Email';
+import LockIcon from '@mui/icons-material/Lock';
+import GoogleIcon from '@mui/icons-material/Google';
+import ChatBubbleIcon from '@mui/icons-material/ChatBubble';
 import * as z from "zod";
 import { Link as RouterLink } from "react-router";
 import Link from "@mui/material/Link";
 import { useSnackbar } from "notistack";
 import { useDispatch } from "react-redux";
 import { useNavigate } from "react-router";
-import { createUserWithEmailAndPassword, signInWithPopup, } from "firebase/auth";
+import { createUserWithEmailAndPassword, signInWithPopup } from "firebase/auth";
 import { auth, googleProvider, db } from "../../firebase/firebase";
 import { handleCurrentUser } from "../../redux/slice/authSlice";
-import { collection, addDoc, serverTimestamp, getDocs, query, where, doc, setDoc, updateDoc } from "firebase/firestore";
-import Visibility from "@mui/icons-material/Visibility";
-import VisibilityOff from "@mui/icons-material/VisibilityOff";
+import { getDocs, query, where, doc, setDoc, updateDoc, collection, serverTimestamp } from "firebase/firestore";
 import { useState } from "react";
+import './auth.css';
 
 function Register() {
   const navigate = useNavigate();
   const { enqueueSnackbar } = useSnackbar();
   const dispatch = useDispatch();
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const signupSchema = z.object({
-    userName: z.string().min(1, "User Name is required"),
+    userName: z.string().min(3, "Username must be at least 3 characters"),
     email: z
       .string()
       .min(1, { message: "Email is required." })
@@ -49,6 +56,7 @@ function Register() {
   });
 
   const onSubmit = async (user: SignupForm) => {
+    setLoading(true);
     try {
       const userCredential = await createUserWithEmailAndPassword(
         auth,
@@ -56,11 +64,8 @@ function Register() {
         user.password
       );
 
-
       const firebaseUser = userCredential.user;
-      console.log(firebaseUser)
 
-      // Save user to Firestore
       await setDoc(doc(db, "users", firebaseUser.uid), {
         id: firebaseUser.uid,
         userName: user.userName,
@@ -68,6 +73,7 @@ function Register() {
         photoUrl: firebaseUser.photoURL || null,
         provider: "email",
         createdAt: serverTimestamp(),
+        isOnline: true
       });
 
       dispatch(
@@ -79,25 +85,27 @@ function Register() {
         })
       );
 
-      enqueueSnackbar("Registered Successfully!", { autoHideDuration: 3000 });
-      navigate("/");
+      enqueueSnackbar("Account created successfully!", { variant: 'success', autoHideDuration: 3000 });
+      navigate("/Dashboard");
     } catch (error: any) {
       console.error(error);
-      enqueueSnackbar(error.message, { autoHideDuration: 3000 });
+      enqueueSnackbar(error.message || "Registration failed", { variant: 'error', autoHideDuration: 3000 });
+    } finally {
+      setLoading(false);
     }
   };
 
   const signInWithGoogle = async () => {
+    setLoading(true);
     try {
       const response = await signInWithPopup(auth, googleProvider);
       const firebaseUser = response.user;
-      console.log(firebaseUser)
+      
       const existingQuery = query(
         collection(db, "users"),
         where("email", "==", firebaseUser.email)
       );
       const existed = await getDocs(existingQuery);
-      console.log("existed", existed)
 
       if (existed.empty) {
         await setDoc(doc(db, "users", firebaseUser.uid), {
@@ -109,14 +117,11 @@ function Register() {
           createdAt: serverTimestamp(),
           isOnline: true
         });
-
-      }
-      if (!existed.empty) {
-        const docRef = doc(db, "users", firebaseUser.uid)
-        console.log("docref", docRef)
+      } else {
+        const docRef = doc(db, "users", firebaseUser.uid);
         await updateDoc(docRef, {
           isOnline: true
-        })
+        });
       }
 
       dispatch(
@@ -128,91 +133,102 @@ function Register() {
         })
       );
 
+      enqueueSnackbar("Signed in with Google!", { variant: 'success', autoHideDuration: 3000 });
       navigate("/Dashboard");
-      enqueueSnackbar("Signed in with Google!", { autoHideDuration: 3000 });
     } catch (error: any) {
       console.error("Google Sign-in Error:", error);
-      enqueueSnackbar(error.message, { autoHideDuration: 3000 });
+      enqueueSnackbar(error.message, { variant: 'error', autoHideDuration: 3000 });
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <>
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          minHeight: "100vh",
-        }}
-      >
-        <Paper
-          elevation={3}
-          sx={{
-            p: 4,
-            width: "100%",
-            maxWidth: 400,
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            flexDirection: "column",
-            boxShadow: "2",
-          }}
-        >
-          <img
-            src="https://freepngimg.com/thumb/logo/69662-instagram-media-brand-social-logo-photography.png"
-            alt="Company Logo"
-            width="300"
-            height="150"
-          />
+    <Box className="auth-container">
+      <div className="auth-background">
+        <div className="gradient-orb orb-1"></div>
+        <div className="gradient-orb orb-2"></div>
+        <div className="gradient-orb orb-3"></div>
+      </div>
 
-          <form onSubmit={handleSubmit(onSubmit)}>
-            <Controller
-              name="userName"
-              control={control}
-              render={({ field }) => (
+      <div className="auth-card">
+        <div className="auth-header">
+          <div className="logo-container">
+            <ChatBubbleIcon className="logo-icon" />
+            <h1>ChatApp</h1>
+          </div>
+          <h2>Create Account</h2>
+          <p>Join us and start chatting with friends</p>
+        </div>
+
+        <form onSubmit={handleSubmit(onSubmit)} className="auth-form">
+          <Controller
+            name="userName"
+            control={control}
+            render={({ field }) => (
+              <div className="form-field">
                 <TextField
                   {...field}
-                  label="User Name"
-                  variant="filled"
+                  label="Username"
+                  variant="outlined"
                   fullWidth
                   error={!!errors.userName}
                   helperText={errors.userName?.message}
-                  sx={{ mb: 2 }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <PersonIcon className="input-icon" />
+                      </InputAdornment>
+                    ),
+                  }}
                 />
-              )}
-            />
+              </div>
+            )}
+          />
 
-            <Controller
-              name="email"
-              control={control}
-              render={({ field }) => (
+          <Controller
+            name="email"
+            control={control}
+            render={({ field }) => (
+              <div className="form-field">
                 <TextField
                   {...field}
-                  label="Email"
-                  variant="filled"
+                  label="Email Address"
+                  variant="outlined"
                   fullWidth
                   error={!!errors.email}
                   helperText={errors.email?.message}
-                  sx={{ mb: 2 }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <EmailIcon className="input-icon" />
+                      </InputAdornment>
+                    ),
+                  }}
                 />
-              )}
-            />
+              </div>
+            )}
+          />
 
-            <Controller
-              name="password"
-              control={control}
-              render={({ field }) => (
+          <Controller
+            name="password"
+            control={control}
+            render={({ field }) => (
+              <div className="form-field">
                 <TextField
                   {...field}
                   label="Password"
                   type={showPassword ? "text" : "password"}
-                  variant="filled"
+                  variant="outlined"
                   fullWidth
                   error={!!errors.password}
                   helperText={errors.password?.message}
-                  sx={{ mb: 2, width: 400 }}
                   InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <LockIcon className="input-icon" />
+                      </InputAdornment>
+                    ),
                     endAdornment: (
                       <InputAdornment position="end">
                         <IconButton
@@ -225,42 +241,53 @@ function Register() {
                     ),
                   }}
                 />
-              )}
-            />
+              </div>
+            )}
+          />
 
-            <Button type="submit" variant="contained" fullWidth sx={{ mt: 2 }}>
-              Sign Up
-            </Button>
-
-            <Button
-              onClick={signInWithGoogle}
-              variant="contained"
-              fullWidth
-              sx={{ mt: 2 }}
-            >
-              Sign in with Google
-            </Button>
-          </form>
-
-          <Typography
-            variant="h4"
-            component="h2"
-            fontSize="15px"
-            sx={{ fontStyle: "italic", m: 4 }}
+          <Button
+            type="submit"
+            variant="contained"
+            size="large"
+            fullWidth
+            disabled={loading}
+            className="submit-btn"
           >
-            Already have an account?
-            <Link
-              component={RouterLink}
-              to="/"
-              underline="hover"
-              sx={{ marginLeft: "5px" }}
-            >
-              Login
-            </Link>
-          </Typography>
-        </Paper>
-      </Box>
-    </>
+            {loading ? (
+              <>
+                <div className="button-spinner"></div>
+                Creating account...
+              </>
+            ) : (
+              'Sign Up'
+            )}
+          </Button>
+
+          <Divider className="divider">
+            <span className="divider-text">OR</span>
+          </Divider>
+
+          <Button
+            onClick={signInWithGoogle}
+            variant="outlined"
+            size="large"
+            fullWidth
+            disabled={loading}
+            className="google-btn"
+            startIcon={<GoogleIcon />}
+          >
+            Continue with Google
+          </Button>
+        </form>
+
+        <Typography className="auth-footer">
+          Already have an account?
+          <Link component={RouterLink} to="/" className="auth-link">
+            Sign in
+          </Link>
+        </Typography>
+      </div>
+    </Box>
   );
 }
 

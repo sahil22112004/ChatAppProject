@@ -1,110 +1,94 @@
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Box, TextField, Button, Typography, Paper, InputAdornment, IconButton } from '@mui/material';
+import { Box, TextField, Button, Typography, InputAdornment, IconButton, Divider } from '@mui/material';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
+import EmailIcon from '@mui/icons-material/Email';
+import LockIcon from '@mui/icons-material/Lock';
+import GoogleIcon from '@mui/icons-material/Google';
+import ChatBubbleIcon from '@mui/icons-material/ChatBubble';
 import * as z from 'zod';
 import { Link as RouterLink } from "react-router";
 import Link from '@mui/material/Link';
 import { handleCurrentUser } from "../../redux/slice/authSlice"
 import { useSnackbar } from 'notistack';
-import { useSelector, useDispatch } from 'react-redux'
-import type { RootState } from '../../redux/store'
+import { useDispatch } from 'react-redux'
 import { useNavigate } from "react-router";
 import { useState } from 'react';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, signInWithPopup } from 'firebase/auth';
 import { auth, googleProvider, db } from '../../firebase/firebase';
-import { signInWithPopup } from 'firebase/auth';
-import { collection, addDoc, serverTimestamp, getDocs, query, where, setDoc, doc, updateDoc } from "firebase/firestore";
-
-
-
-
-
+import { getDocs, query, where, setDoc, doc, updateDoc, collection, serverTimestamp } from "firebase/firestore";
+import './auth.css';
 
 function Login() {
   let navigate = useNavigate();
   const { enqueueSnackbar } = useSnackbar()
   const [showPassword, setShowPassword] = useState(false);
-  // console.log(users);
+  const [loading, setLoading] = useState(false);
   const dispatch = useDispatch()
-  const singupschema = z.object({
+
+  const loginSchema = z.object({
     email: z
       .string()
-      .min(1, 'User Name is required')
+      .min(1, 'Email is required')
       .email("This is not a valid email."),
     password: z
       .string()
       .trim()
       .min(1, 'Password is required')
       .min(6, 'Password must be at least 6 characters'),
-
   });
-  type loginInterface = z.z.infer<typeof singupschema>
+
+  type LoginInterface = z.infer<typeof loginSchema>
 
   const {
     control,
     handleSubmit,
     formState: { errors },
-  } = useForm<loginInterface>({
-    resolver: zodResolver(singupschema),
+  } = useForm<LoginInterface>({
+    resolver: zodResolver(loginSchema),
     defaultValues: {
       email: '',
       password: '',
-
     },
   });
 
-
-  const onSubmit = (user: loginInterface) => {
-
-    // console.log('usersss',user)
-    // const existing = Users.find((i)=>i.userName==user.username )
-    // console.log(existing)
-    // if(existing){
-
-    // dispatch(handleCurrentUser(existing))
-
-    // navigate("/Dashboard")
-
-    // }else{
-    //   enqueueSnackbar('Invalid Credentials', {autoHideDuration: 3000})
-    // }
-
-    signInWithEmailAndPassword(auth, user.email, user.password)
-      .then(async (userCredential) => {
-        // Signed in
-        console.log(userCredential, 'credential')
-        const user = userCredential.user;
-        console.log(user, "user")
-        const ref = doc(db, "users", user.uid)
-        await updateDoc(ref, {
-          isOnline: true
-        })
-
-        dispatch(
-          handleCurrentUser({
-            id: user.uid,
-            userName: user.displayName || null,
-            email: user.email,
-            photoUrl: user.photoURL,
-          })
-        );
-        navigate("/Dashboard")
-        console.log(user);
-      })
-      .catch((error) => {
-        const errorCode = error.code;
-        const errorMessage = error.message;
-        console.log(errorCode, errorMessage)
+  const onSubmit = async (user: LoginInterface) => {
+    setLoading(true);
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, user.email, user.password);
+      const firebaseUser = userCredential.user;
+      
+      const ref = doc(db, "users", firebaseUser.uid)
+      await updateDoc(ref, {
+        isOnline: true
       });
 
+      dispatch(
+        handleCurrentUser({
+          id: firebaseUser.uid,
+          userName: firebaseUser.displayName || null,
+          email: firebaseUser.email,
+          photoUrl: firebaseUser.photoURL,
+        })
+      );
+      
+      enqueueSnackbar("Welcome back!", { variant: 'success', autoHideDuration: 3000 });
+      navigate("/Dashboard");
+    } catch (error: any) {
+      console.error(error);
+      enqueueSnackbar(error.message || "Login failed", { variant: 'error', autoHideDuration: 3000 });
+    } finally {
+      setLoading(false);
+    }
   }
+
   const signInWithGoogle = async () => {
+    setLoading(true);
     try {
       const response = await signInWithPopup(auth, googleProvider);
       const firebaseUser = response.user;
-      console.log(firebaseUser)
+      
       const existingQuery = query(
         collection(db, "users"),
         where("email", "==", firebaseUser.email)
@@ -121,14 +105,13 @@ function Login() {
           createdAt: serverTimestamp(),
           isOnline: true
         });
-      }
-      if(!existed.empty){
+      } else {
         const ref = doc(db, "users", firebaseUser.uid)
         await updateDoc(ref, {
           isOnline: true
-        })
-
+        });
       }
+
       dispatch(
         handleCurrentUser({
           id: firebaseUser.uid,
@@ -138,65 +121,78 @@ function Login() {
         })
       );
 
+      enqueueSnackbar("Signed in with Google!", { variant: 'success', autoHideDuration: 3000 });
       navigate("/Dashboard");
-      enqueueSnackbar("Signed in with Google!", { autoHideDuration: 3000 });
     } catch (error: any) {
       console.error("Google Sign-in Error:", error);
-      enqueueSnackbar(error.message, { autoHideDuration: 3000 });
+      enqueueSnackbar(error.message, { variant: 'error', autoHideDuration: 3000 });
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <>
-      <Box
-        sx={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          minHeight: '100vh',
-        }}
-      >
-        <Paper elevation={3} sx={{
-          p: 4, width: '100%', maxWidth: 400,
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          flexDirection: 'column',
-          boxShadow: '2'
+    <Box className="auth-container">
+      <div className="auth-background">
+        <div className="gradient-orb orb-1"></div>
+        <div className="gradient-orb orb-2"></div>
+        <div className="gradient-orb orb-3"></div>
+      </div>
 
-        }}>
-          <img src='https://freepngimg.com/thumb/logo/69662-instagram-media-brand-social-logo-photography.png' alt="Company Logo" width="300" height="150" />
-          <form onSubmit={handleSubmit(onSubmit)}>
-            <Controller
-              name="email"
-              control={control}
-              render={({ field }) => (
+      <div className="auth-card">
+        <div className="auth-header">
+          <div className="logo-container">
+            <ChatBubbleIcon className="logo-icon" />
+            <h1>ChatApp</h1>
+          </div>
+          <h2>Welcome Back</h2>
+          <p>Sign in to continue your conversations</p>
+        </div>
+
+        <form onSubmit={handleSubmit(onSubmit)} className="auth-form">
+          <Controller
+            name="email"
+            control={control}
+            render={({ field }) => (
+              <div className="form-field">
                 <TextField
                   {...field}
-                  label="Email"
-                  variant="filled"
+                  label="Email Address"
+                  variant="outlined"
                   fullWidth
                   error={!!errors.email}
                   helperText={errors.email?.message}
-                  sx={{ mb: 2 }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <EmailIcon className="input-icon" />
+                      </InputAdornment>
+                    ),
+                  }}
                 />
-              )}
-            />
+              </div>
+            )}
+          />
 
-            <Controller
-              name="password"
-              control={control}
-              render={({ field }) => (
+          <Controller
+            name="password"
+            control={control}
+            render={({ field }) => (
+              <div className="form-field">
                 <TextField
                   {...field}
                   label="Password"
                   type={showPassword ? 'text' : 'password'}
-                  variant="filled"
+                  variant="outlined"
                   fullWidth
                   error={!!errors.password}
                   helperText={errors.password?.message}
-                  sx={{ mb: 2, width: 400 }}
                   InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <LockIcon className="input-icon" />
+                      </InputAdornment>
+                    ),
                     endAdornment: (
                       <InputAdornment position="end">
                         <IconButton
@@ -209,37 +205,54 @@ function Login() {
                     )
                   }}
                 />
-              )}
-            />
+              </div>
+            )}
+          />
 
+          <Button
+            type="submit"
+            variant="contained"
+            size="large"
+            fullWidth
+            disabled={loading}
+            className="submit-btn"
+          >
+            {loading ? (
+              <>
+                <div className="button-spinner"></div>
+                Signing in...
+              </>
+            ) : (
+              'Sign In'
+            )}
+          </Button>
 
-            <Button
-              type="submit"
-              variant="contained"
-              size="large"
-              fullWidth
-              sx={{ mt: 2 }}
-            >
-              Login
-            </Button>
-            <Button
-              onClick={signInWithGoogle}
-              variant="contained"
-              size="large"
-              fullWidth
-              sx={{ mt: 2 }}
-            >
-              Sign in with Google
-            </Button>
-          </form>
-          <Typography variant="h4" component="h2" fontSize="15px" sx={{ fontStyle: 'italic', m: 4 }} >
-            Already have accout<Link component={RouterLink} to="/Register" underline="hover" sx={{ marginLeft: '5px' }} >Singup</Link>
-          </Typography>
-        </Paper>
-      </Box>
+          <Divider className="divider">
+            <span className="divider-text">OR</span>
+          </Divider>
 
-    </>
+          <Button
+            onClick={signInWithGoogle}
+            variant="outlined"
+            size="large"
+            fullWidth
+            disabled={loading}
+            className="google-btn"
+            startIcon={<GoogleIcon />}
+          >
+            Continue with Google
+          </Button>
+        </form>
+
+        <Typography className="auth-footer">
+          Don't have an account?
+          <Link component={RouterLink} to="/Register" className="auth-link">
+            Sign up
+          </Link>
+        </Typography>
+      </div>
+    </Box>
   );
 }
 
-export default Login
+export default Login;

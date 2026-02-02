@@ -4,6 +4,10 @@ import SearchIcon from "@mui/icons-material/Search";
 import HomeIcon from "@mui/icons-material/Home";
 import FavoriteBorderIcon from "@mui/icons-material/FavoriteBorder";
 import MapsUgcIcon from "@mui/icons-material/MapsUgc";
+import SendIcon from "@mui/icons-material/Send";
+import AttachFileIcon from "@mui/icons-material/AttachFile";
+import InsertEmoticonIcon from "@mui/icons-material/InsertEmoticon";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import "./dashboard.css";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -12,12 +16,27 @@ import TableContainer from "@mui/material/TableContainer";
 import TableRow from "@mui/material/TableRow";
 import Paper from "@mui/material/Paper";
 import { db, auth } from "../../firebase/firebase";
-import {collection, addDoc, query, orderBy, onSnapshot, doc, updateDoc, setDoc, getDocs, limit, startAfter} from "firebase/firestore";
+import {
+  collection,
+  addDoc,
+  query,
+  orderBy,
+  onSnapshot,
+  doc,
+  updateDoc,
+  setDoc,
+  getDocs,
+  limit,
+  startAfter,
+} from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import { useEffect, useState, useRef } from "react";
 import { handleCurrentUser } from "../../redux/slice/authSlice";
 import EmojiPicker, { EmojiClickData } from "emoji-picker-react";
 import { useNavigate } from "react-router";
+
+const CLOUDINARY_UPLOAD_PRESET = process.env.REACT_APP_CLOUDINARY_UPLOAD_PRESET;
+const CLOUDINARY_CLOUD_NAME = process.env.REACT_APP_CLOUDINARY_CLOUD_NAME;
 
 function Dashboard() {
   const currentUser = useSelector((state: RootState) => state.auth.currentUser);
@@ -27,21 +46,45 @@ function Dashboard() {
   const [users, setUsers] = useState<any[]>([]);
   const [lastUserDoc, setLastUserDoc] = useState<any>(null);
   const [usersLoading, setUsersLoading] = useState(false);
-  const USERS_LIMIT = 10;
+  const USERS_LIMIT = 15;
 
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [inputMsg, setInputMsg] = useState("");
   const [showProfileBox, setShowProfileBox] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [imageUploading, setImageUploading] = useState(false);
+  const [showMobileChat, setShowMobileChat] = useState(false);
   const navigate = useNavigate();
 
   const usersRefDiv = useRef<HTMLDivElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const getChatId = (id1: string, id2: string) =>
     id1 < id2 ? `${id1}_${id2}` : `${id2}_${id1}`;
 
-  // FIRST LOAD USERS
+  // ⬇️ ADD THIS EFFECT — MAKE USER OFFLINE ON TAB CLOSE
+  useEffect(() => {
+    const markOffline = async () => {
+      if (currentUser) {
+        await updateDoc(doc(db, "users", currentUser.id), {
+          isOnline: false,
+        });
+      }
+    };
+
+    window.addEventListener("beforeunload", markOffline);
+    return () => window.removeEventListener("beforeunload", markOffline);
+  }, [currentUser]);
+  // ⬆️ END ADD
+
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Load initial users
   const loadInitialUsers = async () => {
     if (!currentUser) return;
     setUsersLoading(true);
@@ -65,7 +108,7 @@ function Dashboard() {
     setUsersLoading(false);
   };
 
-  // LOAD MORE USERS ON SCROLL
+  // Load more users (infinite scroll)
   const loadMoreUsers = async () => {
     if (!currentUser || !lastUserDoc || usersLoading) return;
     setUsersLoading(true);
@@ -94,8 +137,14 @@ function Dashboard() {
     loadInitialUsers();
   }, [currentUser]);
 
+  // Search users
   useEffect(() => {
     if (!currentUser) return;
+
+    if (searchInput.trim() === "") {
+      loadInitialUsers();
+      return;
+    }
 
     const unsub = onSnapshot(collection(db, "users"), (snapshot) => {
       const all: any[] = [];
@@ -112,7 +161,7 @@ function Dashboard() {
     });
 
     return () => unsub();
-  }, [currentUser, searchInput]);
+  }, [searchInput]);
 
   const handleScrollUsers = () => {
     const div = usersRefDiv.current;
@@ -126,6 +175,7 @@ function Dashboard() {
   const loadMessages = (receiver: any) => {
     if (!currentUser) return;
     setSelectedUser(receiver);
+    setShowMobileChat(true);
 
     const chatId = getChatId(currentUser.id, receiver.id);
     const qMsg = query(
@@ -152,7 +202,6 @@ function Dashboard() {
       unsubTyping();
     };
   };
-  
 
   const handleTyping = async () => {
     if (!currentUser || !selectedUser) return;
@@ -179,12 +228,13 @@ function Dashboard() {
     }, 2000);
   };
 
-  const sendMessage = async () => {
-    if (!inputMsg.trim() || !selectedUser || !currentUser) return;
+  const sendMessage = async (imageUrl?: string) => {
+    if ((!inputMsg.trim() && !imageUrl) || !selectedUser || !currentUser) return;
     const chatId = getChatId(currentUser.id, selectedUser.id);
 
     await addDoc(collection(db, "chats", chatId, "messages"), {
       text: inputMsg,
+      imageUrl: imageUrl || null,
       sender: currentUser.id,
       receiver: selectedUser.id,
       timestamp: new Date(),
@@ -197,46 +247,109 @@ function Dashboard() {
     setInputMsg("");
   };
 
+  const uploadToCloudinary = async (file: File): Promise<string | null> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET ?? "");
+    formData.append("cloud_name", CLOUDINARY_CLOUD_NAME ?? "");
+    formData.append("folder", "chat_images");
+
+    try {
+      const response = await fetch(
+        `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.secure_url) {
+        return data.secure_url;
+      } else {
+        throw new Error("Failed to get image URL");
+      }
+    } catch (error) {
+      console.error("Cloudinary upload error:", error);
+      throw error;
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser || !selectedUser) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert("Image size should be less than 10MB");
+      return;
+    }
+
+    setImageUploading(true);
+
+    try {
+      const imageUrl = await uploadToCloudinary(file);
+
+      if (imageUrl) {
+        await sendMessage(imageUrl);
+      }
+    } catch (error) {
+      console.error("Image upload failed:", error);
+      alert("Failed to upload image. Please try again.");
+    }
+
+    setImageUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   const handleLogout = async () => {
     if (currentUser) {
       await updateDoc(doc(db, "users", currentUser.id), { isOnline: false });
     }
     await signOut(auth);
     dispatch(handleCurrentUser(null));
-    window.location.href = "/";
+    navigate("/");
   };
 
-  const onEmojiClick = (emojiObject: EmojiClickData) =>
+  const onEmojiClick = (emojiObject: EmojiClickData) => {
     setInputMsg((prev) => prev + emojiObject.emoji);
+    setShowPicker(false);
+  };
 
-  if (!currentUser) return <h2>Please login first...</h2>;
+  const handleBackToUsers = () => {
+    setShowMobileChat(false);
+    setSelectedUser(null);
+  };
+
+  if (!currentUser) return <h2 className="login-message">Please login first...</h2>;
 
   return (
     <div className="main-container">
       <header>
         <div className="logo">
-          <img src="/logo.png" width="200" height="50" />
+          <h1>💬 ChatApp</h1>
         </div>
 
         <div className="icons">
-          <SearchIcon />
-          <MapsUgcIcon />
-          <HomeIcon />
-          <FavoriteBorderIcon />
+          <SearchIcon className="header-icon" />
+          <MapsUgcIcon className="header-icon" />
+          <HomeIcon className="header-icon" />
+          <FavoriteBorderIcon className="header-icon" />
           <img
             src={currentUser.photoUrl || "/defaultImg.jpg"}
             width="40"
             height="40"
             className="header-profile-img"
             onClick={() => setShowProfileBox(!showProfileBox)}
+            alt="Profile"
           />
           {showProfileBox && (
             <div className="profile-popup">
               <button className="profile-name" onClick={() => navigate("/EditProfile")}>
-                Profile
+                👤 Profile
               </button>
               <button className="logout-btn" onClick={handleLogout}>
-                Logout
+                🚪 Logout
               </button>
             </div>
           )}
@@ -244,12 +357,13 @@ function Dashboard() {
       </header>
 
       <div className="chat-section">
-        <div className="users-section">
+        <div className={`users-section ${showMobileChat ? "mobile-hidden" : ""}`}>
           <div className="user-search">
+            <SearchIcon className="search-icon" />
             <input
               type="text"
               className="userSearchInput"
-              placeholder="Search user..."
+              placeholder="Search users..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
             />
@@ -258,35 +372,40 @@ function Dashboard() {
             className="users"
             ref={usersRefDiv}
             onScroll={handleScrollUsers}
-            style={{ overflowY: "auto", height: "calc(100vh - 140px)" }}
           >
-            <TableContainer component={Paper}>
+            <TableContainer component={Paper} elevation={0}>
               <Table>
                 <TableBody>
                   {users.length > 0 ? (
                     users.map((user) => (
                       <TableRow
                         key={user.id}
-                        sx={{ height: 70, cursor: "pointer" }}
+                        className="user-row"
                         onClick={() => loadMessages(user)}
                       >
-                        <TableCell sx={{ display: "flex", alignItems: "center" }}>
-                          <img
-                            src={user.photoUrl || "/defaultImg.jpg"}
-                            width="40"
-                            height="40"
-                            style={{ borderRadius: "50%", marginRight: "20px" }}
-                          />
-                          {user.userName || user.email}
-                          {user.isOnline && (
-                            <span style={{ color: "green", marginLeft: 10 }}>• online</span>
-                          )}
+                        <TableCell>
+                          <div className="user-item">
+                            <div className="user-avatar-container">
+                              <img
+                                src={user.photoUrl || "/defaultImg.jpg"}
+                                className="user-avatar"
+                                alt={user.userName}
+                              />
+                              {user.isOnline && <span className="online-dot"></span>}
+                            </div>
+                            <div className="user-info">
+                              <span className="user-name">{user.userName || user.email}</span>
+                              {user.isOnline && (
+                                <span className="online-status">Online</span>
+                              )}
+                            </div>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell>No users found</TableCell>
+                      <TableCell className="no-users">No users found</TableCell>
                     </TableRow>
                   )}
                 </TableBody>
@@ -294,22 +413,35 @@ function Dashboard() {
             </TableContainer>
 
             {usersLoading && (
-              <p style={{ textAlign: "center", padding: "10px" }}>Loading...</p>
+              <div className="loading-indicator">
+                <div className="spinner"></div>
+                <p>Loading more users...</p>
+              </div>
             )}
           </div>
         </div>
 
-        <div className="chat-page">
+        <div className={`chat-page ${showMobileChat ? "mobile-visible" : ""}`}>
           {selectedUser ? (
             <>
               <div className="reciverInfo">
-                <img
-                  src={selectedUser.photoUrl || "/defaultImg.jpg"}
-                  width="45"
-                  height="45"
-                  style={{ borderRadius: "50%", marginRight: "15px" }}
-                />
-                <h3>{selectedUser.userName || selectedUser.email}</h3>
+                <div className="receiver-left">
+                  <ArrowBackIcon
+                    className="back-arrow"
+                    onClick={handleBackToUsers}
+                  />
+                  <img
+                    src={selectedUser.photoUrl || "/defaultImg.jpg"}
+                    className="receiver-avatar"
+                    alt={selectedUser.userName}
+                  />
+                  <div>
+                    <h3>{selectedUser.userName || selectedUser.email}</h3>
+                    {selectedUser.isOnline && (
+                      <span className="online-badge">Online</span>
+                    )}
+                  </div>
+                </div>
               </div>
 
               <div className="chat-messages">
@@ -326,30 +458,53 @@ function Dashboard() {
                   return (
                     <div key={idx} className={`message-row ${isMe ? "me" : "them"}`}>
                       <div className="message-bubble">
-                        <span className="message-text">{msg.text}</span>
+                        {msg.imageUrl && (
+                          <img
+                            src={msg.imageUrl}
+                            className="message-image"
+                            alt="Sent image"
+                          />
+                        )}
+                        {msg.text && <span className="message-text">{msg.text}</span>}
                         <span className="message-time">{formatted}</span>
                       </div>
                     </div>
                   );
                 })}
+                <div ref={messagesEndRef} />
               </div>
 
               {isTyping && (
-                <div
-                  style={{
-                    fontStyle: "italic",
-                    color: "gray",
-                    marginLeft: 15,
-                    marginBottom: 5,
-                  }}
-                >
-                  {selectedUser.userName || selectedUser.email} is typing...
+                <div className="typing-indicator">
+                  <div className="typing-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                  <span>{selectedUser.userName || selectedUser.email} is typing...</span>
                 </div>
               )}
 
               <div className="chat-input">
-                <button className="btn">
-                  <img src="/add.png" width="35" />
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleImageUpload}
+                  accept="image/*"
+                  style={{ display: "none" }}
+                />
+
+                <button
+                  className="attach-btn"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={imageUploading}
+                  title="Attach image"
+                >
+                  {imageUploading ? (
+                    <div className="mini-spinner"></div>
+                  ) : (
+                    <AttachFileIcon />
+                  )}
                 </button>
 
                 <div className="emoji-section">
@@ -360,28 +515,42 @@ function Dashboard() {
                   )}
                 </div>
 
-                <button className="emoji-btn" onClick={() => setShowPicker(!showPicker)}>
-                  <img src="/emoji.png" width="35" />
+                <button
+                  className="emoji-btn"
+                  onClick={() => setShowPicker(!showPicker)}
+                  title="Add emoji"
+                >
+                  <InsertEmoticonIcon />
                 </button>
 
                 <input
                   type="text"
-                  placeholder="Message..."
+                  placeholder="Type a message..."
                   value={inputMsg}
                   onChange={(e) => {
                     setInputMsg(e.target.value);
                     handleTyping();
                   }}
                   onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+                  className="message-input"
                 />
 
-                <button className="send-btn" onClick={sendMessage}>
-                  <img src="/sendBtn.png" width="40" />
+                <button
+                  className="send-btn"
+                  onClick={() => sendMessage()}
+                  disabled={!inputMsg.trim() && !imageUploading}
+                  title="Send message"
+                >
+                  <SendIcon />
                 </button>
               </div>
             </>
           ) : (
-            <div className="no-chat-selected">Select a user to chat</div>
+            <div className="no-chat-selected">
+              <MapsUgcIcon className="no-chat-icon" />
+              <h2>Start a Conversation</h2>
+              <p>Select a user from the list to begin chatting</p>
+            </div>
           )}
         </div>
       </div>
